@@ -73,6 +73,10 @@ class LlmClient:
             if config.debug:
                 print(f"[LLM] {elapsed:.1f}s | in={usage.get('prompt_tokens',0)} out={usage.get('completion_tokens',0)}")
 
+            if not content or not content.strip():
+                if config.debug:
+                    print(f"[LLM] Пустой ответ! raw: {repr(content)[:200]}")
+                return "[LLM не дал ответа — попробуй другую модель]"
             return content.strip()
 
         except requests.exceptions.Timeout:

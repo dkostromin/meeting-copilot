@@ -18,7 +18,7 @@ class AudioConfig:
 @dataclass
 class SttConfig:
     """Whisper STT."""
-    model_size: str = "large-v3"              # tiny/base/small/medium/large-v3/distil-large-v3
+    model_size: str = "distil-large-v3"        # distil-large-v3 (быстрее large-v3, почти та же точность)
     device: str = "auto"                       # auto / metal / cpu
     compute_type: str = "auto"                 # auto / float16 / int8
     language: str = "auto"                     # auto / ru / en
