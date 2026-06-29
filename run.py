@@ -5,6 +5,8 @@ import time
 import threading
 import sys
 import re
+import os
+import glob
 
 from config import config
 from audio_capture import AudioCapture
@@ -61,6 +63,51 @@ def has_tech_trigger(text: str) -> bool:
     return any(trigger in text_lower for trigger in TECH_TRIGGERS)
 
 
+def _show_models_info():
+    """Показать скачанные Whisper модели и путь к кэшу."""
+    # Поиск кэша в стандартных местах
+    cache_dirs = [
+        os.path.expanduser("~/.cache/huggingface/hub/models--*"),
+        os.path.expanduser("~/.cache/faster_whisper/*"),
+    ]
+
+    print("📦 Whisper models cache:")
+    found = False
+    for pattern in cache_dirs:
+        for p in sorted(glob.glob(pattern)):
+            if os.path.isdir(p):
+                size_mb = 0
+                for root, dirs, files in os.walk(p):
+                    for f in files:
+                        try:
+                            size_mb += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+                size_mb /= 1024 * 1024
+                name = os.path.basename(p).replace("models--", "").replace("faster_whisper_", "")
+                print(f"  📁 {name}: {size_mb:.0f} MB")
+                print(f"     {p}")
+                found = True
+
+    if not found:
+        cache_hf = os.path.expanduser("~/.cache/huggingface/hub/")
+        cache_fw = os.path.expanduser("~/.cache/faster_whisper/")
+        print(f"  (нет моделей в {cache_hf} или {cache_fw})")
+        print(f"  Путь: {cache_hf}")
+        print(f"  Путь: {cache_fw}")
+
+    print()
+    print("🗑  Удалить модель: rm -rf ~/.cache/huggingface/hub/models--*название*")
+    print("   или: rm -rf ~/.cache/faster_whisper/*")
+    print()
+
+    # Рекомендация
+    print("💡 Рекомендация: после тестов удалите ненужные модели:")
+    print("   rm -rf ~/.cache/huggingface/hub/models--Systran--faster-whisper-*")
+    print("   rm -rf ~/.cache/faster_whisper/*")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Meeting Copilot")
     parser.add_argument("--mock", action="store_true", help="Mock audio (dev)")
@@ -69,7 +116,14 @@ def main():
     parser.add_argument("--capture", action="store_true", help="Реальный захват аудио")
     parser.add_argument("--mic", action="store_true", help="Только микрофон (без BlackHole)")
     parser.add_argument("--proactive", action="store_true", help="Проактивный режим (автодетект вопросов)")
+    parser.add_argument("--show-models", action="store_true", help="Показать скачанные модели и путь к кэшу")
+    parser.add_argument("--model-path", action="store_true", help="Показать путь к кэшу моделей")
     args = parser.parse_args()
+
+    # Режимы показа информации
+    if args.show_models or args.model_path:
+        _show_models_info()
+        return 0
 
     config.mock_audio = args.mock or not args.capture
     config.debug = args.debug
