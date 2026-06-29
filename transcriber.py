@@ -23,21 +23,46 @@ class Transcriber:
         self._thread: Optional[threading.Thread] = None
 
     def load_model(self):
-        """Загрузка Whisper модели."""
+        """Загрузка Whisper модели с прогресс-баром."""
         if self._model is not None:
             return
 
         stt = config.stt
-        print(f"Loading Whisper {stt.model_size} ({stt.device}/{stt.compute_type})...")
-        from faster_whisper import WhisperModel
-        self._model = WhisperModel(
-            stt.model_size,
-            device=stt.device,
-            compute_type=stt.compute_type,
-            cpu_threads=4,
-            num_workers=1,
-        )
-        print("Whisper loaded ✓")
+        print(f"Loading Whisper {stt.model_size} ({stt.device}/{stt.compute_type})...\n")
+
+        # Спиннер в отдельном потоке
+        stop_spinner = threading.Event()
+
+        def _spinner():
+            chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+            i = 0
+            while not stop_spinner.is_set():
+                sys.stdout.write(f"\r{' ' * 40}\rDownloading model {chars[i]}")
+                sys.stdout.flush()
+                i = (i + 1) % len(chars)
+                if stop_spinner.wait(0.08):
+                    break
+            sys.stdout.write("\r" + " " * 50 + "\r")
+            sys.stdout.flush()
+
+        import sys
+        spinner_thread = threading.Thread(target=_spinner, daemon=True)
+        spinner_thread.start()
+
+        try:
+            from faster_whisper import WhisperModel
+            self._model = WhisperModel(
+                stt.model_size,
+                device=stt.device,
+                compute_type=stt.compute_type,
+                cpu_threads=4,
+                num_workers=1,
+            )
+        finally:
+            stop_spinner.set()
+            spinner_thread.join(timeout=1)
+
+        print("✅ Whisper loaded ✓")
 
     def feed(self, audio: np.ndarray, source: str = "mic"):
         """Добавить аудио на обработку."""
