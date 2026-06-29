@@ -160,11 +160,11 @@ def main():
             prefix = "🎤" if source == "mic" else "🔈"
             print(f"[{prefix}] {text}")
 
-        # Проактивный режим — автодетект
+        # Проактивный режим — автодетект (в отдельном потоке, не блокируем STT)
         if config.proactive and is_question(text):
             if config.debug:
-                print(f"\n🧠 Детект вопроса: {text[:80]}")
-            _trigger_assistant(context, llm, overlay)
+                print(f"🧠 Детект вопроса: {text[:80]}")
+            threading.Thread(target=_trigger_assistant, args=(context, llm, overlay), daemon=True).start()
 
     # Транскрайбер
     transcriber = Transcriber(on_text=on_text)
