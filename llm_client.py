@@ -62,10 +62,10 @@ class LlmClient:
             choice = data["choices"][0]
             msg = choice.get("message", {})
 
-            # Пробуем разные поля
+            # Пробуем разные поля (DeepSeek кладёт ответ в reasoning_content)
             content = msg.get("content", "")
             if not content:
-                content = msg.get("text", "")
+                content = msg.get("reasoning_content", "") or msg.get("reasoning", "") or msg.get("text", "")
 
             usage = data.get("usage", {})
             if config.debug:
