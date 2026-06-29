@@ -35,22 +35,13 @@ class LlmClient:
         context: Optional[list[dict]] = None,
         system_override: Optional[str] = None,
     ) -> str:
-        """
-        Отправить запрос в LLM.
-
-        Args:
-            user_message: Текущий вопрос/запрос
-            context: История последних фраз [{role, content}]
-            system_override: Переопределить system prompt
-        """
+        """Отправить запрос в LLM."""
         messages = [{"role": "system", "content": system_override or self.system_prompt}]
 
-        # Контекст разговора (последние N сообщений)
         if context:
             recent = context[-20:]
             messages.extend(recent)
 
-        # Текущий запрос
         messages.append({"role": "user", "content": user_message})
 
         payload = {
@@ -68,14 +59,25 @@ class LlmClient:
             data = resp.json()
             elapsed = time.time() - t0
 
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            msg = choice.get("message", {})
+
+            # Пробуем разные поля
+            content = msg.get("content", "")
+            if not content:
+                content = msg.get("text", "")
+
             usage = data.get("usage", {})
             if config.debug:
-                print(f"[LLM] {elapsed:.1f}s | in={usage.get('prompt_tokens',0)} out={usage.get('completion_tokens',0)}")
+                print(f"[LLM] {elapsed:.1f}s | in={usage.get('prompt_tokens',0)} out={usage.get('completion_tokens',0)})")
+                # Если ответ пустой — покажем весь ответ
+                if not content or not content.strip():
+                    print(f"[LLM] ⚠️ Пустой ответ. Сырой: {json.dumps(data, indent=2)[:500]}")
+                    # Попробуем альтернативный путь — choice.finish_reason + model
+                    finish = choice.get("finish_reason", "?")
+                    print(f"[LLM] finish_reason={finish}, model={data.get('model','?')}")
 
             if not content or not content.strip():
-                if config.debug:
-                    print(f"[LLM] Пустой ответ! raw: {repr(content)[:200]}")
                 return "[LLM не дал ответа — попробуй другую модель]"
             return content.strip()
 

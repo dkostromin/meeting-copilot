@@ -18,7 +18,7 @@ class AudioConfig:
 @dataclass
 class SttConfig:
     """Whisper STT."""
-    model_size: str = "distil-large-v3"        # distil-large-v3 (быстрее large-v3, почти та же точность)
+    model_size: str = "medium"                 # medium — оптимально для быстродействия на Mac CPU
     device: str = "auto"                       # auto / metal / cpu
     compute_type: str = "auto"                 # auto / float16 / int8
     language: str = "auto"                     # auto / ru / en
