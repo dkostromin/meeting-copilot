@@ -17,22 +17,35 @@ class AudioConfig:
 
 @dataclass
 class SttConfig:
-    """Whisper STT."""
-    model_size: str = "medium"                 # medium — оптимально для быстродействия на Mac CPU
+    """STT backend selection + per-backend config."""
+    # Backend: "whisper" | "deepgram" | "google"
+    backend: str = "whisper"
+
+    # --- Whisper params ---
+    model_size: str = "medium"
     device: str = "auto"                       # auto / metal / cpu
     compute_type: str = "auto"                 # auto / float16 / int8
     language: str = "auto"                     # auto / ru / en
     beam_size: int = 5
     vad_filter: bool = True
 
+    # --- Deepgram params ---
+    deepgram_api_key: str = ""
+
+    # --- Google STT params ---
+    google_credentials_path: str = ""          # путь к JSON-ключу сервисного аккаунта
+
     def __post_init__(self):
+        # Whisper auto-detects
         if self.device == "auto":
-            # faster-whisper на Mac не поддерживает device="metal"
-            # CTranslate2 сам использует ARM NEON оптимизации на CPU
             self.device = "cpu"
         if self.compute_type == "auto":
-            # int8 — оптимально для CPU/ARM NEON
             self.compute_type = "int8"
+        # API-ключи из окружения, если не заданы явно
+        if not self.deepgram_api_key:
+            self.deepgram_api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+        if not self.google_credentials_path:
+            self.google_credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 
 @dataclass

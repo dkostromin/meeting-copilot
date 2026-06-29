@@ -1,6 +1,13 @@
+# ── Core ──
 faster-whisper>=1.0.0
 sounddevice>=0.4.6
 numpy>=1.24.0
 pynput>=1.7.6
 PyQt6>=6.5.0
 requests>=2.31.0
+
+# ── Deepgram (опционально: python run.py --stt-backend deepgram) ──
+aiohttp>=3.9.0
+
+# ── Google Cloud STT (опционально: python run.py --stt-backend google) ──
+google-cloud-speech>=2.24.0

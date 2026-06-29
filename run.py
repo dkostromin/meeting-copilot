@@ -118,6 +118,10 @@ def main():
     parser.add_argument("--proactive", action="store_true", help="Проактивный режим (автодетект вопросов)")
     parser.add_argument("--show-models", action="store_true", help="Показать скачанные модели и путь к кэшу")
     parser.add_argument("--model-path", action="store_true", help="Показать путь к кэшу моделей")
+    parser.add_argument(
+        "--stt-backend", choices=["whisper", "deepgram", "google"],
+        help="STT бекенд: whisper (локальный), deepgram (API), google (Cloud STT)",
+    )
     args = parser.parse_args()
 
     # Режимы показа информации
@@ -129,6 +133,8 @@ def main():
     config.debug = args.debug
     config.proactive = args.proactive
     config.mic_only = args.mic
+    if args.stt_backend:
+        config.stt.backend = args.stt_backend
 
     # Инициализация
     context = ContextRing()
@@ -142,7 +148,10 @@ def main():
 
     print("=" * 50)
     print("🎙  Meeting Copilot")
-    print(f"🎤  Whisper: {config.stt.model_size} ({config.stt.device})")
+    if config.stt.backend == "whisper":
+        print(f"🎤  Whisper: {config.stt.model_size} ({config.stt.device})")
+    else:
+        print(f"🎤  STT: {config.stt.backend}")
     print(f"🤖  LLM: {config.llm.model} @ {config.llm.base_url}")
     print(f"📋  Контекст: {config.context.max_seconds // 60} мин")
     if config.proactive:
