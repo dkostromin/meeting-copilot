@@ -27,9 +27,12 @@ class SttConfig:
 
     def __post_init__(self):
         if self.device == "auto":
-            self.device = "metal" if platform.system() == "Darwin" else "cpu"
+            # faster-whisper на Mac не поддерживает device="metal"
+            # CTranslate2 сам использует ARM NEON оптимизации на CPU
+            self.device = "cpu"
         if self.compute_type == "auto":
-            self.compute_type = "float16" if self.device == "metal" else "int8"
+            # int8 — оптимально для CPU/ARM NEON
+            self.compute_type = "int8"
 
 
 @dataclass
