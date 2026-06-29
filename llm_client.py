@@ -1,4 +1,4 @@
-"""OpenCode / OpenAI-compatible API клиент."""
+"""OpenAI-compatible API клиент."""
 
 import json
 import time
@@ -6,8 +6,9 @@ from typing import Optional
 import requests
 from config import config
 
+
 class LlmClient:
-    """Клиент для OpenCode (DeepSeek) / любого OpenAI-compatible API."""
+    """Клиент для любого OpenAI-compatible API."""
 
     def __init__(self):
         cfg = config.llm
@@ -16,6 +17,7 @@ class LlmClient:
         self.model = cfg.model
         self.max_tokens = cfg.max_tokens
         self.temperature = cfg.temperature
+        self.timeout = cfg.timeout
         self.system_prompt = cfg.system_prompt
         self._session = requests.Session()
         self._session.headers.update({
@@ -31,7 +33,6 @@ class LlmClient:
         self,
         user_message: str,
         context: Optional[list[dict]] = None,
-        rag_context: Optional[str] = None,
         system_override: Optional[str] = None,
     ) -> str:
         """
@@ -39,24 +40,14 @@ class LlmClient:
 
         Args:
             user_message: Текущий вопрос/запрос
-            context: История последних фраз [{"role": "user"/"assistant", "content": "..."}]
-            rag_context: Результаты RAG поиска
+            context: История последних фраз [{role, content}]
             system_override: Переопределить system prompt
         """
         messages = [{"role": "system", "content": system_override or self.system_prompt}]
 
-        # RAG контекст (документация)
-        if rag_context:
-            messages.append({
-                "role": "system",
-                "content": f"Вот релевантная документация из базы знаний:\n\n{rag_context[:4000]}"
-            })
-
-        # Контекст разговора
+        # Контекст разговора (последние N сообщений)
         if context:
-            # Берем последние N сообщений
-            max_context = 20
-            recent = context[-max_context:]
+            recent = context[-20:]
             messages.extend(recent)
 
         # Текущий запрос
@@ -72,7 +63,7 @@ class LlmClient:
 
         t0 = time.time()
         try:
-            resp = self._session.post(self._endpoint, json=payload, timeout=30)
+            resp = self._session.post(self._endpoint, json=payload, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
             elapsed = time.time() - t0
@@ -84,21 +75,22 @@ class LlmClient:
 
             return content.strip()
 
+        except requests.exceptions.Timeout:
+            return "[LLM превысила таймаут]"
+        except requests.exceptions.ConnectionError:
+            return "[LLM недоступна — проверь API ключ и URL]"
         except requests.exceptions.RequestException as e:
             return f"[Ошибка API] {e}"
         except (KeyError, json.JSONDecodeError) as e:
-            return f"[Ошибка парсинга ответа] {e}"
+            return f"[Ошибка парсинга] {e}"
 
     def ask_stream(
         self,
         user_message: str,
         context: Optional[list[dict]] = None,
-        rag_context: Optional[str] = None,
     ):
         """Streaming версия — для посимвольного вывода."""
         messages = [{"role": "system", "content": self.system_prompt}]
-        if rag_context:
-            messages.append({"role": "system", "content": f"Контекст из базы:\n{rag_context[:3000]}"})
         if context:
             messages.extend(context[-20:])
         messages.append({"role": "user", "content": user_message})
@@ -112,15 +104,18 @@ class LlmClient:
         }
 
         try:
-            resp = self._session.post(self._endpoint, json=payload, stream=True, timeout=60)
+            resp = self._session.post(self._endpoint, json=payload, stream=True, timeout=self.timeout)
             resp.raise_for_status()
             for line in resp.iter_lines():
                 if line:
                     line = line.decode().strip()
                     if line.startswith("data: ") and line != "data: [DONE]":
-                        data = json.loads(line[6:])
-                        delta = data["choices"][0].get("delta", {}).get("content", "")
-                        if delta:
-                            yield delta
+                        try:
+                            data = json.loads(line[6:])
+                            delta = data["choices"][0].get("delta", {}).get("content", "")
+                            if delta:
+                                yield delta
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
         except Exception as e:
             yield f"[Ошибка] {e}"

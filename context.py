@@ -1,30 +1,31 @@
 """Контекстное кольцо — rolling window последних фраз."""
 
+import time
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 from config import config
+
 
 @dataclass
 class TranscriptEntry:
     text: str
-    source: str  # "mic" | "system"
+    source: str       # "mic" | "system"
     timestamp: float
     role: str = "user"  # "user" | "assistant"
+
 
 class ContextRing:
     """Rolling window транскриптов (5 мин по умолчанию)."""
 
     def __init__(self):
         self._entries: deque[TranscriptEntry] = deque(maxlen=config.context.max_pairs)
-        self._llm_entries: list[dict] = []
 
     def add(self, text: str, source: str = "mic"):
         """Добавить распознанную фразу."""
         entry = TranscriptEntry(
             text=text,
             source=source,
-            timestamp=__import__("time").time(),
+            timestamp=time.time(),
             role="user",
         )
         self._entries.append(entry)
@@ -34,14 +35,14 @@ class ContextRing:
         entry = TranscriptEntry(
             text=text,
             source="assistant",
-            timestamp=__import__("time").time(),
+            timestamp=time.time(),
             role="assistant",
         )
         self._entries.append(entry)
 
     def _trim_old(self):
         """Отсечь фразы старше max_seconds."""
-        cutoff = __import__("time").time() - config.context.max_seconds
+        cutoff = time.time() - config.context.max_seconds
         while self._entries and self._entries[0].timestamp < cutoff:
             self._entries.popleft()
 
@@ -66,17 +67,31 @@ class ContextRing:
             messages.append({"role": e.role, "content": e.text})
         return messages
 
+    def get_last_text(self) -> str:
+        """Последняя фраза (для триггеров)."""
+        self._trim_old()
+        if self._entries:
+            return self._entries[-1].text
+        return ""
+
     def get_transcript(self) -> str:
         """Полный транскрипт последних 5 минут."""
         self._trim_old()
+        from datetime import datetime
         parts = []
         for e in self._entries:
-            parts.append(f"[{__import__('datetime').datetime.fromtimestamp(e.timestamp).strftime('%H:%M:%S')}] {'🎤' if e.source == 'mic' else '🔈'} {e.text}")
+            ts = datetime.fromtimestamp(e.timestamp).strftime("%H:%M:%S")
+            prefix = "🎤" if e.source == "mic" else "🔈"
+            parts.append(f"[{ts}] {prefix} {e.text}")
         return "\n".join(parts)
 
     @property
     def duration_seconds(self) -> float:
         """Длительность контекста в секундах."""
-        if not self._entries:
+        if len(self._entries) < 2:
             return 0
         return self._entries[-1].timestamp - self._entries[0].timestamp
+
+    @property
+    def count(self) -> int:
+        return len(self._entries)

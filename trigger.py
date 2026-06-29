@@ -1,20 +1,19 @@
-"""Глобальный хоткей (Cmd+Shift+H) + overlay UI (PyQt6)."""
+"""Глобальный хоткей + overlay UI (PyQt6)."""
 
 import sys
 import threading
 from typing import Optional, Callable
 from config import config
 
+
 class HotkeyListener:
-    """Слушатель глобального хоткея.
-    
-    На macOS использует `keyboard` или fallback на input monitoring.
-    """
+    """Слушатель глобального хоткея (pynput для macOS)."""
 
     def __init__(self, on_trigger: Optional[Callable[[], None]] = None):
         self.on_trigger = on_trigger
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._listener = None
 
     def start(self):
         self._running = True
@@ -24,15 +23,64 @@ class HotkeyListener:
 
     def stop(self):
         self._running = False
+        if self._listener:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
 
     def _listen(self):
         try:
-            import keyboard
-            hotkey = config.overlay.hotkey.replace("cmd", "command")
-            keyboard.add_hotkey(hotkey, self._on_press)
-            keyboard.wait()
-        except (ImportError, NotImplementedError, OSError):
-            # Fallback: polling stdin
+            from pynput import keyboard as pynput_kb
+
+            # Парсим hotkey: "cmd+shift+h" → [Key.cmd, Key.shift, 'h']
+            parts = config.overlay.hotkey.split("+")
+            key_map = {
+                "cmd": pynput_kb.Key.cmd,
+                "command": pynput_kb.Key.cmd,
+                "ctrl": pynput_kb.Key.ctrl,
+                "control": pynput_kb.Key.ctrl,
+                "shift": pynput_kb.Key.shift,
+                "alt": pynput_kb.Key.alt,
+                "option": pynput_kb.Key.alt,
+            }
+
+            modifiers = set()
+            target_key = None
+
+            for p in parts:
+                p = p.strip().lower()
+                if p in key_map:
+                    modifiers.add(key_map[p])
+                elif len(p) == 1:
+                    target_key = pynput_kb.KeyCode.from_char(p)
+
+            if target_key is None:
+                print("[Hotkey] Не удалось распарсить хоткей")
+                self._listen_fallback()
+                return
+
+            current = set()
+
+            def on_press(key):
+                if key in modifiers:
+                    current.add(key)
+                elif key == target_key and current == modifiers:
+                    if self.on_trigger:
+                        self.on_trigger()
+
+            def on_release(key):
+                current.discard(key)
+
+            self._listener = pynput_kb.Listener(on_press=on_press, on_release=on_release)
+            self._listener.start()
+            self._listener.wait()
+
+        except ImportError:
+            print("[Hotkey] pynput не установлен — fallback на Enter")
+            self._listen_fallback()
+        except Exception as e:
+            print(f"[Hotkey] Ошибка: {e} — fallback на Enter")
             self._listen_fallback()
 
     def _listen_fallback(self):
@@ -41,21 +89,19 @@ class HotkeyListener:
         while self._running:
             try:
                 input()
-                self._on_press()
+                if self.on_trigger:
+                    self.on_trigger()
             except (EOFError, KeyboardInterrupt):
                 break
-
-    def _on_press(self):
-        if self.on_trigger:
-            self.on_trigger()
 
 
 class OverlayUI:
     """Плавающее окно с подсказками (PyQt6)."""
 
     def __init__(self):
-        self._app: Optional["QApplication"] = None  # noqa
-        self._window: Optional["QWindow"] = None     # noqa
+        self._app = None
+        self._window = None
+        self._label = None
         self._started = threading.Event()
 
     def run(self):
@@ -66,8 +112,8 @@ class OverlayUI:
 
     def _run_loop(self):
         from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
-        from PyQt6.QtCore import Qt, QRect, QPoint
-        from PyQt6.QtGui import QFont, QScreen
+        from PyQt6.QtCore import Qt, QTimer
+        from PyQt6.QtGui import QFont
 
         app = QApplication(sys.argv)
         self._app = app
@@ -120,17 +166,29 @@ class OverlayUI:
 
         self._started.set()
         window.show()
-        sys.exit(app.exec())
+        app.exec()
 
     def show_result(self, text: str):
-        """Обновить текст в оверлее."""
-        if self._label:
-            self._label.setText(text)
+        """Обновить текст в оверлее (thread-safe через QTimer)."""
+        if self._label is None or self._app is None:
+            return
+
+        # Qt требует обновление UI из главного потока
+        # Используем QTimer.singleShot для безопасного обновления
+        def _update():
+            if self._label:
+                self._label.setText(text)
+
+        try:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, _update)
+        except Exception:
+            # Если QTimer недоступен — напрямую (может быть небезопасно)
+            _update()
 
     def show_status(self, text: str):
         """Показать статус (загрузка, ошибка)."""
-        if self._label:
-            self._label.setText(f"[{text}]")
+        self.show_result(f"[{text}]")
 
     def stop(self):
         if self._app:

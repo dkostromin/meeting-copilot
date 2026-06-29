@@ -2,10 +2,11 @@
 
 import time
 import threading
+import queue as _queue
 import numpy as np
 from typing import Optional, Callable
-from faster_whisper import WhisperModel
 from config import config
+
 
 class Transcriber:
     """Whisper-based speech-to-text с VAD."""
@@ -16,10 +17,9 @@ class Transcriber:
         source: "mic" или "system"
         """
         self.on_text = on_text
-        self._model: Optional[WhisperModel] = None
+        self._model = None
         self._running = False
-        self._queue: list[tuple[np.ndarray, str, float]] = []  # (audio, source, ts)
-        self._lock = threading.Lock()
+        self._queue: _queue.Queue = _queue.Queue(maxsize=50)
         self._thread: Optional[threading.Thread] = None
 
     def load_model(self):
@@ -29,6 +29,7 @@ class Transcriber:
 
         stt = config.stt
         print(f"Loading Whisper {stt.model_size} ({stt.device}/{stt.compute_type})...")
+        from faster_whisper import WhisperModel
         self._model = WhisperModel(
             stt.model_size,
             device=stt.device,
@@ -40,40 +41,54 @@ class Transcriber:
 
     def feed(self, audio: np.ndarray, source: str = "mic"):
         """Добавить аудио на обработку."""
-        if len(audio) < config.audio.sample_rate * 0.5:  # минимум 0.5s
+        if len(audio) < config.audio.sample_rate * 0.5:
             return
-        with self._lock:
-            self._queue.append((audio.copy(), source, time.time()))
+        try:
+            self._queue.put_nowait((audio.copy(), source, time.time()))
+        except _queue.Full:
+            # Дропаем самый старый чанк
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait((audio.copy(), source, time.time()))
+            except _queue.Empty:
+                pass
 
     def process_one(self, audio: np.ndarray, source: str) -> Optional[str]:
         """Транскрибировать один аудио-сегмент."""
         if self._model is None:
             return None
-        segments, info = self._model.transcribe(
-            audio,
-            beam_size=config.stt.beam_size,
-            vad_filter=config.stt.vad_filter,
-            language=config.stt.language if config.stt.language != "auto" else None,
-        )
-        texts = []
-        for seg in segments:
-            texts.append(seg.text.strip())
-        return " ".join(texts) if texts else None
+        try:
+            segments, info = self._model.transcribe(
+                audio,
+                beam_size=config.stt.beam_size,
+                vad_filter=config.stt.vad_filter,
+                language=config.stt.language if config.stt.language != "auto" else None,
+            )
+            texts = []
+            for seg in segments:
+                t = seg.text.strip()
+                if t:
+                    texts.append(t)
+            return " ".join(texts) if texts else None
+        except Exception as e:
+            print(f"[STT] Ошибка транскрибации: {e}")
+            return None
 
     def _loop(self):
         """Фоновый цикл транскрибации."""
         while self._running:
-            item = None
-            with self._lock:
-                if self._queue:
-                    item = self._queue.pop(0)
-            if item:
-                audio, source, ts = item
-                text = self.process_one(audio, source)
-                if text and self.on_text:
+            try:
+                item = self._queue.get(timeout=0.5)
+            except _queue.Empty:
+                continue
+
+            audio, source, ts = item
+            text = self.process_one(audio, source)
+            if text and self.on_text:
+                try:
                     self.on_text(text, source)
-            else:
-                time.sleep(0.1)
+                except Exception as e:
+                    print(f"[STT] Ошибка callback: {e}")
 
     def start(self):
         self._running = True
@@ -87,5 +102,4 @@ class Transcriber:
 
     @property
     def pending(self) -> int:
-        with self._lock:
-            return len(self._queue)
+        return self._queue.qsize()
